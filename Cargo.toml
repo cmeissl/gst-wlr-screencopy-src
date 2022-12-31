@@ -1,0 +1,40 @@
+[package]
+edition = "2021"
+name = "gst-plugin-wlr-screencopy"
+description = "Gstreamer wlr-screencopy src"
+version = "0.1.0"
+authors = ["Christian Meissl <meissl.christian@gmail.com>"]
+repository = "https://github.com/cmeissl/gst-wlr-screencopy-src"
+
+
+[lib]
+name = "gstwlrscreencopy"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+gstreamer = "0.19"
+gstreamer-allocators = "0.19"
+gstreamer-base = "0.19"
+once_cell = "1.0"
+
+[build-dependencies]
+gst-plugin-version-helper = "0.7"
+
+[features]
+static = []
+capi = []
+doc = ["gstreamer/v1_18"]
+
+[package.metadata.capi]
+min_version = "0.8.0"
+
+[package.metadata.capi.header]
+enabled = false
+
+[package.metadata.capi.library]
+install_subdir = "gstreamer-1.0"
+versioning = false
+
+[package.metadata.capi.pkg_config]
+requires_private = "gstreamer-1.0, gstreamer-base-1.0, gobject-2.0, glib-2.0, gmodule-2.0"
