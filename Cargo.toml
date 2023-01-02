@@ -1,30 +1,39 @@
 [package]
+authors = ["Christian Meissl <meissl.christian@gmail.com>"]
+description = "Gstreamer wlr-screencopy src"
 edition = "2021"
 name = "gst-plugin-wlr-screencopy"
-description = "Gstreamer wlr-screencopy src"
-version = "0.1.0"
-authors = ["Christian Meissl <meissl.christian@gmail.com>"]
 repository = "https://github.com/cmeissl/gst-wlr-screencopy-src"
-
+version = "0.1.0"
 
 [lib]
-name = "gstwlrscreencopy"
 crate-type = ["cdylib", "rlib"]
+name = "gstwlrscreencopy"
 path = "src/lib.rs"
 
 [dependencies]
-gstreamer = "0.19"
-gstreamer-allocators = "0.19"
-gstreamer-base = "0.19"
+drm-fourcc = "2.2"
+gbm = "0.11"
+gstreamer = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
+gstreamer-allocators = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
+gstreamer-base = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
+gstreamer-base-sys = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
+gstreamer-sys = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
+gstreamer-video = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
+memfd = "0.6"
+nix = "0.26"
 once_cell = "1.0"
+wayland-client = "0.30"
+wayland-protocols = {version = "0.30", features = ["client", "unstable"]}
+wayland-protocols-wlr = {version = "0.1", features = ["client"]}
 
 [build-dependencies]
 gst-plugin-version-helper = "0.7"
 
 [features]
-static = []
 capi = []
 doc = ["gstreamer/v1_18"]
+static = []
 
 [package.metadata.capi]
 min_version = "0.8.0"
