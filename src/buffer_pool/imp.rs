@@ -119,8 +119,20 @@ impl BufferPoolImpl for WaylandBufferPool {
 
             let mut buffer = gstreamer::Buffer::new();
             let buffer_mut = buffer.make_mut();
-            super::meta::WaylandBufferMeta::add(buffer_mut, wl_buffer);
             buffer_mut.insert_memory(None, mem);
+            super::meta::WaylandBufferMeta::add(buffer_mut, wl_buffer);
+            gstreamer_video::VideoMeta::add_full(
+                buffer_mut,
+                gstreamer_video::VideoFrameFlags::empty(),
+                video_info.format(),
+                video_info.width(),
+                video_info.height(),
+                video_info.offset(),
+                video_info.stride(),
+            ).map_err(|err| {
+                gstreamer::warning!(CAT, imp: self, "failed to add video meta: {:?}", err);
+                gstreamer::FlowError::Error
+            })?;
             buffer_mut.unset_flags(gstreamer::BufferFlags::TAG_MEMORY);
             return Ok(buffer);
         }
@@ -168,8 +180,22 @@ impl BufferPoolImpl for WaylandBufferPool {
                     self.dummy_object_data.clone(),
                 )
                 .expect("failed to create buffer");
-            super::meta::WaylandBufferMeta::add(buffer.make_mut(), wl_buffer);
             pool.destroy();
+            
+            let buffer_mut = buffer.make_mut();
+            super::meta::WaylandBufferMeta::add(buffer_mut, wl_buffer);
+            gstreamer_video::VideoMeta::add_full(
+                buffer_mut,
+                gstreamer_video::VideoFrameFlags::empty(),
+                video_info.format(),
+                video_info.width(),
+                video_info.height(),
+                video_info.offset(),
+                video_info.stride(),
+            ).map_err(|err| {
+                gstreamer::warning!(CAT, imp: self, "failed to add video meta: {:?}", err);
+                gstreamer::FlowError::Error
+            })?;
             return Ok(buffer);
         }
 
