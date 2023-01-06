@@ -713,47 +713,8 @@ impl PushSrcImpl for WlrScreencopySrc {
         let mut state_guard = self.wayland_state.lock().unwrap();
         let state = state_guard.as_mut().unwrap();
         let settings = self.settings.lock().unwrap();
-        if state.current_frame.is_none() {
-            let (output, _, _) = if let Some(output_name) = settings.output_name.as_deref() {
-                state
-                    .outputs
-                    .iter()
-                    .find(|(_, _, info)| info.name == output_name)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "output {} not found, available outputs: {}",
-                            output_name,
-                            state
-                                .outputs
-                                .iter()
-                                .map(|(_, _, info)| &info.name)
-                                .fold("".to_owned(), |acc, item| { format!("{} {}", acc, item) })
-                                .trim()
-                        )
-                    })
-            } else {
-                state.outputs.first().expect("no outputs")
-            };
 
-            let frame = state
-                .wlr_screencopy_manager
-                .capture_output(0, output, &state.qhandle, ());
-            state.current_frame = Some((frame, Default::default()));
-
-            while !state
-                .current_frame
-                .as_ref()
-                .map(|(_, info)| info.done)
-                .unwrap_or(false)
-            {
-                event_queue_guard
-                    .as_mut()
-                    .unwrap()
-                    .blocking_dispatch(state)
-                    .expect("failed to dispatch");
-            }
-        }
-
+        // first finish the current frame
         let frame = state
             .current_frame
             .as_ref()
@@ -776,8 +737,47 @@ impl PushSrcImpl for WlrScreencopySrc {
 
         let (frame, frame_info) = state.current_frame.take().unwrap();
         frame.destroy();
-
         let frame_state = frame_info.state.unwrap();
+
+        // then shedule the next frame
+        let (output, _, _) = if let Some(output_name) = settings.output_name.as_deref() {
+            state
+                .outputs
+                .iter()
+                .find(|(_, _, info)| info.name == output_name)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "output {} not found, available outputs: {}",
+                        output_name,
+                        state
+                            .outputs
+                            .iter()
+                            .map(|(_, _, info)| &info.name)
+                            .fold("".to_owned(), |acc, item| { format!("{} {}", acc, item) })
+                            .trim()
+                    )
+                })
+        } else {
+            state.outputs.first().expect("no outputs")
+        };
+
+        let frame = state
+            .wlr_screencopy_manager
+            .capture_output(0, output, &state.qhandle, ());
+        state.current_frame = Some((frame, Default::default()));
+
+        while !state
+            .current_frame
+            .as_ref()
+            .map(|(_, info)| info.done)
+            .unwrap_or(false)
+        {
+            event_queue_guard
+                .as_mut()
+                .unwrap()
+                .blocking_dispatch(state)
+                .expect("failed to dispatch");
+        }
 
         match frame_state {
             FrameState::Ready(_timestamp) => {
