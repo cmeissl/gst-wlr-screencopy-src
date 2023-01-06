@@ -92,7 +92,29 @@ impl BufferPoolImpl for WaylandBufferPool {
                 modifier_hi,
                 modifier_lo,
             );
-            let wl_buffer = params.send_constructor::<wayland_client::protocol::wl_buffer::WlBuffer>(wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::Request::CreateImmed { width: 1024, height: 768, format: gbm::Format::Xrgb8888 as u32, flags: WEnum::Value(wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::Flags::empty()) }, self.dummy_object_data.clone()).expect("failed to create buffer");
+
+            let format = match video_info.format() {
+                gstreamer_video::VideoFormat::Abgr => drm_fourcc::DrmFourcc::Abgr8888,
+                gstreamer_video::VideoFormat::Argb => drm_fourcc::DrmFourcc::Argb8888,
+                gstreamer_video::VideoFormat::Bgra => drm_fourcc::DrmFourcc::Bgra8888,
+                gstreamer_video::VideoFormat::Bgrx => drm_fourcc::DrmFourcc::Bgrx8888,
+                gstreamer_video::VideoFormat::Rgba => drm_fourcc::DrmFourcc::Rgba8888,
+                gstreamer_video::VideoFormat::Rgbx => drm_fourcc::DrmFourcc::Rgbx8888,
+                gstreamer_video::VideoFormat::Xbgr => drm_fourcc::DrmFourcc::Xbgr8888,
+                gstreamer_video::VideoFormat::Xrgb => drm_fourcc::DrmFourcc::Xrgb8888,
+                _ => {
+                    params.destroy();
+                    return Err(gstreamer::FlowError::Error);
+                }
+            };
+            let wl_buffer = params.send_constructor::<wayland_client::protocol::wl_buffer::WlBuffer>(
+                wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::Request::CreateImmed { 
+                    width: video_info.width() as i32,
+                    height: video_info.height() as i32,
+                    format: format as u32,
+                    flags: WEnum::Value(wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::Flags::empty())
+                }, 
+                self.dummy_object_data.clone()).expect("failed to create buffer");
             params.destroy();
 
             let mut buffer = gstreamer::Buffer::new();
@@ -241,7 +263,10 @@ impl ObjectData for DummyObjectData {
     fn event(
         self: Arc<Self>,
         _backend: &wayland_client::backend::Backend,
-        _msg: wayland_client::backend::protocol::Message<ObjectId, wayland_client::backend::io_lifetimes::OwnedFd>,
+        _msg: wayland_client::backend::protocol::Message<
+            ObjectId,
+            wayland_client::backend::io_lifetimes::OwnedFd,
+        >,
     ) -> Option<Arc<dyn ObjectData>> {
         None
     }
