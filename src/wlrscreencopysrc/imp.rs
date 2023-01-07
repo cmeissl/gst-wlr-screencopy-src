@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Mutex;
 
-use gstreamer::prelude::{ParamSpecBuilderExt, ToValue};
+use gstreamer::prelude::{Cast, ParamSpecBuilderExt, ToValue};
 use gstreamer_base::traits::BaseSrcExt;
+use gstreamer_video::VideoBufferPoolConfig;
 use once_cell::sync::Lazy;
 
 use gstreamer::subclass::prelude::*;
@@ -16,6 +17,7 @@ use wayland_client::protocol::wl_shm;
 use wayland_client::{protocol::wl_registry, Connection, Dispatch, Proxy};
 use wayland_client::{QueueHandle, Weak};
 
+use crate::allocators::{DmaHeapMemoryAllocator, GbmMemoryAllocator, MemfdMemoryAllocator};
 use crate::buffer_pool::{WaylandBufferMeta, WaylandBufferPool};
 
 #[derive(Debug, Default)]
@@ -44,6 +46,7 @@ struct FrameShmFormat {
     format: wayland_client::protocol::wl_shm::Format,
     width: u32,
     height: u32,
+    stride: u32,
 }
 
 #[derive(Debug)]
@@ -152,10 +155,10 @@ impl Dispatch<wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_fra
         }
 
         match event {
-            wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_frame_v1::Event::Buffer { format, width, height, .. } => {
+            wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_frame_v1::Event::Buffer { format, width, height, stride } => {
                 // TODO: Figure out how to handle the stride, currently we use the stride as defined by gstreamer for a format
                 if let Ok(format) = format.into_result() {
-                    frame_info.shm_formats.push(FrameShmFormat { format, width, height });
+                    frame_info.shm_formats.push(FrameShmFormat { format, width, height, stride });
                 }
             },
             wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_frame_v1::Event::Flags { flags } => {
@@ -640,61 +643,133 @@ impl BaseSrcImpl for WlrScreencopySrc {
     ) -> Result<(), gstreamer::LoggableError> {
         let guard = self.wayland_state.lock().unwrap();
         let state = guard.as_ref().unwrap();
-        let dmabuf_formats = state
+
+        let (caps, _) = query.get_owned();
+        let video_info =
+            gstreamer_video::VideoInfo::from_caps(&caps).expect("failed to get video info");
+
+        let is_dmabuf_format = state
             .current_frame
             .as_ref()
             .map(|(_, frame_info)| {
-                frame_info.dmabuf_formats.iter().filter_map(|format| {
-                    let format = match format.format {
-                        drm_fourcc::DrmFourcc::Abgr8888 => gstreamer_video::VideoFormat::Abgr,
-                        drm_fourcc::DrmFourcc::Argb8888 => gstreamer_video::VideoFormat::Argb,
-                        drm_fourcc::DrmFourcc::Bgra8888 => gstreamer_video::VideoFormat::Bgra,
-                        drm_fourcc::DrmFourcc::Bgrx8888 => gstreamer_video::VideoFormat::Bgrx,
-                        drm_fourcc::DrmFourcc::Rgba8888 => gstreamer_video::VideoFormat::Rgba,
-                        drm_fourcc::DrmFourcc::Rgbx8888 => gstreamer_video::VideoFormat::Rgbx,
-                        drm_fourcc::DrmFourcc::Xbgr8888 => gstreamer_video::VideoFormat::Xbgr,
-                        drm_fourcc::DrmFourcc::Xrgb8888 => gstreamer_video::VideoFormat::Xrgb,
-                        _ => return None,
-                    };
-                    Some(format)
-                })
-            })
-            .unwrap();
-        let buffer_pool =
-            WaylandBufferPool::new(&state.wl_shm, state.dmabuf.as_ref(), dmabuf_formats);
+                let format = match video_info.format() {
+                    gstreamer_video::VideoFormat::Abgr => drm_fourcc::DrmFourcc::Abgr8888,
+                    gstreamer_video::VideoFormat::Argb => drm_fourcc::DrmFourcc::Argb8888,
+                    gstreamer_video::VideoFormat::Bgra => drm_fourcc::DrmFourcc::Bgra8888,
+                    gstreamer_video::VideoFormat::Bgrx => drm_fourcc::DrmFourcc::Bgrx8888,
+                    gstreamer_video::VideoFormat::Rgba => drm_fourcc::DrmFourcc::Rgba8888,
+                    gstreamer_video::VideoFormat::Rgbx => drm_fourcc::DrmFourcc::Rgbx8888,
+                    gstreamer_video::VideoFormat::Xbgr => drm_fourcc::DrmFourcc::Xbgr8888,
+                    gstreamer_video::VideoFormat::Xrgb => drm_fourcc::DrmFourcc::Xrgb8888,
+                    _ => return false,
+                };
 
-        if let Some((_pool, size, min, max)) = query.allocation_pools().get(0) {
-            dbg!(size);
-            if let Some(video_meta_index) = query.find_allocation_meta::<gstreamer_video::VideoMeta>() {
-                let allocation_metas = query.allocation_metas();
-                dbg!(&allocation_metas);
-                let (_, video_meta) = unsafe { allocation_metas.get_unchecked(video_meta_index as usize) };
-                dbg!(video_meta);
+                frame_info
+                    .dmabuf_formats
+                    .iter()
+                    .any(|dmabuf_format| dmabuf_format.format == format)
+            })
+            .unwrap_or(false);
+
+        let buffer_pool = WaylandBufferPool::new(&state.wl_shm, state.dmabuf.as_ref());
+        let use_dmabuf_allocator = is_dmabuf_format && state.dmabuf.is_some();
+        let allocator = if use_dmabuf_allocator {
+            if DmaHeapMemoryAllocator::is_available() {
+                DmaHeapMemoryAllocator::default().upcast()
+            } else {
+                GbmMemoryAllocator::default().upcast()
             }
+        } else {
+            MemfdMemoryAllocator::default().upcast()
+        };
+        let video_align = if use_dmabuf_allocator {
+            // FIXME: So, it seems if we provide a dmabuf to a encoder
+            // it requires the buffer to be aligned.
+            // Aligning the plane to 4 pixels seems to work...
+            Some(gstreamer_video::VideoAlignment::new(
+                0,
+                0,
+                0,
+                0,
+                &[4, 0, 0, 0],
+            ))
+        } else {
+            let format = match video_info.format() {
+                gstreamer_video::VideoFormat::Abgr => wl_shm::Format::Abgr8888,
+                gstreamer_video::VideoFormat::Argb => wl_shm::Format::Argb8888,
+                gstreamer_video::VideoFormat::Bgra => wl_shm::Format::Bgra8888,
+                gstreamer_video::VideoFormat::Bgrx => wl_shm::Format::Bgrx8888,
+                gstreamer_video::VideoFormat::Rgba => wl_shm::Format::Rgba8888,
+                gstreamer_video::VideoFormat::Rgbx => wl_shm::Format::Rgbx8888,
+                gstreamer_video::VideoFormat::Xbgr => wl_shm::Format::Xbgr8888,
+                gstreamer_video::VideoFormat::Xrgb => wl_shm::Format::Xrgb8888,
+                _ => unreachable!(),
+            };
+            let stride = state
+                .current_frame
+                .as_ref()
+                .map(|(_, frame_info)| {
+                    frame_info
+                        .shm_formats
+                        .iter()
+                        .find(|shm_format| shm_format.format == format)
+                        .map(|shm_format| shm_format.stride)
+                        .unwrap()
+                })
+                .unwrap();
+
+            if video_info.stride()[0] != stride as i32 {
+                // FIXME: Calculate the stride alignment
+                unimplemented!()
+            }
+
+            None
+        };
+
+        if let Some((_, size, min, max)) = query.allocation_pools().get(0) {
             let mut config = buffer_pool.config();
-            let (caps, _) = query.get_owned();
-            let video_info =
-                gstreamer_video::VideoInfo::from_caps(&caps).expect("failed to get video info");
+            config.set_allocator(Some(&allocator), None);
+            if query
+                .find_allocation_meta::<gstreamer_video::VideoMeta>()
+                .is_some()
+            {
+                config.add_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META);
+            }
+            if let Some(video_align) = video_align {
+                config.add_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT);
+                config.set_video_alignment(&video_align);
+            }
             let size = std::cmp::max(*size, video_info.size() as u32);
-            dbg!(size);
             config.set_params(Some(&caps), size, *min, *max);
             buffer_pool
                 .set_config(config)
                 .expect("failed to set config");
-            query.set_nth_allocation_pool(0, Some(&buffer_pool), size, *min, *max);
+            query.set_nth_allocation_pool(0, Some(&buffer_pool), size, 0, 0);
         } else {
             let mut config = buffer_pool.config();
+            config.set_allocator(Some(&allocator), None);
+            if query
+                .find_allocation_meta::<gstreamer_video::VideoMeta>()
+                .is_some()
+            {
+                config.add_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META);
+            }
             let (caps, _) = query.get_owned();
-            let video_info =
+            let mut video_info =
                 gstreamer_video::VideoInfo::from_caps(&caps).expect("failed to get video info");
-            config.set_params(Some(&caps), video_info.size() as u32, 0, 4);
+            if let Some(mut video_align) = video_align {
+                config.add_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT);
+                config.set_video_alignment(&video_align);
+                let _ = video_info.align(&mut video_align);
+            }
+            config.set_params(Some(&caps), video_info.size() as u32, 0, 0);
             buffer_pool
                 .set_config(config)
                 .expect("failed to set config");
-            query.add_allocation_pool(Some(&buffer_pool), video_info.size() as u32, 0, 4);
+            query.add_allocation_pool(Some(&buffer_pool), video_info.size() as u32, 0, 0);
         };
 
-        self.parent_decide_allocation(query)
+        Ok(())
     }
 }
 
@@ -707,7 +782,10 @@ impl PushSrcImpl for WlrScreencopySrc {
             .obj()
             .buffer_pool()
             .expect("buffer_pool set in decide_allocation");
-        let new_buffer = pool.acquire_buffer(None)?;
+        let buffer_pool_aquire_params = gstreamer::BufferPoolAcquireParams::with_flags(
+            gstreamer::BufferPoolAcquireFlags::empty(),
+        );
+        let new_buffer = pool.acquire_buffer(Some(&buffer_pool_aquire_params))?;
         let wl_buffer_meta = new_buffer
             .meta::<WaylandBufferMeta>()
             .expect("no wayland buffer meta");

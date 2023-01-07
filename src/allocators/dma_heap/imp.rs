@@ -10,6 +10,14 @@ pub struct DmaHeapMemoryAllocator {
     heap: dma_heap::Heap,
 }
 
+impl DmaHeapMemoryAllocator {
+    pub fn is_available() -> bool {
+        dma_heap::Heap::new(dma_heap::HeapKind::Cma)
+            .or_else(|_| dma_heap::Heap::new(dma_heap::HeapKind::System))
+            .is_ok()
+    }
+}
+
 impl Default for DmaHeapMemoryAllocator {
     fn default() -> Self {
         Self {

@@ -4,6 +4,13 @@ WIP
 
 ## Testing locally
 
+### Software Encoding
+
+```sh
+export GST_PLUGIN_PATH="$PWD/target/debug"
+gst-launch-1.0 wlrscreencopysrc display="wayland-1" ! autovideoconvert ! openh264enc ! openh264dec ! vaapipostproc ! queue ! waylandsink
+```
+
 ### Gstreamer VA-API
 
 ```sh
