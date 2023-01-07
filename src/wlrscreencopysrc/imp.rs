@@ -663,22 +663,25 @@ impl BaseSrcImpl for WlrScreencopySrc {
         let buffer_pool =
             WaylandBufferPool::new(&state.wl_shm, state.dmabuf.as_ref(), dmabuf_formats);
 
-        if let Some((_pool, _size, min, max)) = query.allocation_pools().get(0) {
+        if let Some((_pool, size, min, max)) = query.allocation_pools().get(0) {
+            dbg!(size);
+            if let Some(video_meta_index) = query.find_allocation_meta::<gstreamer_video::VideoMeta>() {
+                let allocation_metas = query.allocation_metas();
+                dbg!(&allocation_metas);
+                let (_, video_meta) = unsafe { allocation_metas.get_unchecked(video_meta_index as usize) };
+                dbg!(video_meta);
+            }
             let mut config = buffer_pool.config();
             let (caps, _) = query.get_owned();
             let video_info =
                 gstreamer_video::VideoInfo::from_caps(&caps).expect("failed to get video info");
-            config.set_params(Some(&caps), video_info.size() as u32, *min, *max);
+            let size = std::cmp::max(*size, video_info.size() as u32);
+            dbg!(size);
+            config.set_params(Some(&caps), size, *min, *max);
             buffer_pool
                 .set_config(config)
                 .expect("failed to set config");
-            query.set_nth_allocation_pool(
-                0,
-                Some(&buffer_pool),
-                video_info.size() as u32,
-                *min,
-                *max,
-            );
+            query.set_nth_allocation_pool(0, Some(&buffer_pool), size, *min, *max);
         } else {
             let mut config = buffer_pool.config();
             let (caps, _) = query.get_owned();
@@ -691,7 +694,7 @@ impl BaseSrcImpl for WlrScreencopySrc {
             query.add_allocation_pool(Some(&buffer_pool), video_info.size() as u32, 0, 4);
         };
 
-        Ok(())
+        self.parent_decide_allocation(query)
     }
 }
 

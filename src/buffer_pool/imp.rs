@@ -10,7 +10,7 @@ use wayland_client::backend::{ObjectData, ObjectId};
 use wayland_client::protocol::wl_shm;
 use wayland_client::{Proxy, WEnum};
 
-use crate::allocators::{GbmMemoryAllocator, MemfdMemoryAllocator};
+use crate::allocators::{GbmMemoryAllocator, MemfdMemoryAllocator, DmaHeapMemoryAllocator};
 
 static CAT: Lazy<gstreamer::DebugCategory> = Lazy::new(|| {
     gstreamer::DebugCategory::new(
@@ -134,12 +134,72 @@ impl BufferPoolImpl for WaylandBufferPool {
                 gstreamer::FlowError::Error
             })?;
             buffer_mut.unset_flags(gstreamer::BufferFlags::TAG_MEMORY);
+            dbg!(buffer.size());
             return Ok(buffer);
         }
 
         // if we got here we have an fd based allocator
         let mut buffer = self.parent_alloc_buffer(params)?;
+        dbg!(buffer.size());
         let mem = buffer.memory(0).unwrap();
+
+        if let Some(dmabuf_memory) = mem.downcast_memory_ref::<gstreamer_allocators::DmaBufMemory>() {
+            let zwp_linux_dmabuf = state.zwp_linux_dmabuf.as_ref().unwrap();
+
+            let params = zwp_linux_dmabuf.send_constructor::<wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::ZwpLinuxBufferParamsV1>(wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::Request::CreateParams {  }, self.dummy_object_data.clone()).expect("failed to create params");
+            let modifier = u64::from(gbm::Modifier::Linear);
+            let modifier_hi = (modifier >> 32) as u32;
+            let modifier_lo = modifier as u32;
+            params.add(
+                dmabuf_memory.fd(),
+                0,
+                0,
+                video_info.stride()[0] as u32,
+                modifier_hi,
+                modifier_lo,
+            );
+
+            let format = match video_info.format() {
+                gstreamer_video::VideoFormat::Abgr => drm_fourcc::DrmFourcc::Abgr8888,
+                gstreamer_video::VideoFormat::Argb => drm_fourcc::DrmFourcc::Argb8888,
+                gstreamer_video::VideoFormat::Bgra => drm_fourcc::DrmFourcc::Bgra8888,
+                gstreamer_video::VideoFormat::Bgrx => drm_fourcc::DrmFourcc::Bgrx8888,
+                gstreamer_video::VideoFormat::Rgba => drm_fourcc::DrmFourcc::Rgba8888,
+                gstreamer_video::VideoFormat::Rgbx => drm_fourcc::DrmFourcc::Rgbx8888,
+                gstreamer_video::VideoFormat::Xbgr => drm_fourcc::DrmFourcc::Xbgr8888,
+                gstreamer_video::VideoFormat::Xrgb => drm_fourcc::DrmFourcc::Xrgb8888,
+                _ => {
+                    params.destroy();
+                    return Err(gstreamer::FlowError::Error);
+                }
+            };
+            let wl_buffer = params.send_constructor::<wayland_client::protocol::wl_buffer::WlBuffer>(
+                wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::Request::CreateImmed { 
+                    width: video_info.width() as i32,
+                    height: video_info.height() as i32,
+                    format: format as u32,
+                    flags: WEnum::Value(wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::Flags::empty())
+                }, 
+                self.dummy_object_data.clone()).expect("failed to create buffer");
+            params.destroy();
+
+            let buffer_mut = buffer.make_mut();
+            super::meta::WaylandBufferMeta::add(buffer_mut, wl_buffer);
+            gstreamer_video::VideoMeta::add_full(
+                buffer_mut,
+                gstreamer_video::VideoFrameFlags::empty(),
+                video_info.format(),
+                video_info.width(),
+                video_info.height(),
+                video_info.offset(),
+                video_info.stride(),
+            ).map_err(|err| {
+                gstreamer::warning!(CAT, imp: self, "failed to add video meta: {:?}", err);
+                gstreamer::FlowError::Error
+            })?;
+
+            return Ok(buffer);
+        }
 
         if let Some(fd_memory) = mem.downcast_memory_ref::<gstreamer_allocators::FdMemory>() {
             let wl_shm = state.wl_shm.as_ref().unwrap();
@@ -249,7 +309,8 @@ impl BufferPoolImpl for WaylandBufferPool {
         let allocator: gstreamer::Allocator = if guard.dmabuf_formats.contains(&video_info.format())
             && guard.zwp_linux_dmabuf.is_some()
         {
-            GbmMemoryAllocator::default().upcast()
+            //GbmMemoryAllocator::default().upcast()
+            DmaHeapMemoryAllocator::default().upcast()
         } else {
             MemfdMemoryAllocator::default().upcast()
         };
@@ -259,7 +320,7 @@ impl BufferPoolImpl for WaylandBufferPool {
         config.set_allocator(Some(&allocator), None);
         config.set_params(
             Some(&caps),
-            video_info_size as u32,
+            size,
             min_buffers,
             max_buffers,
         );

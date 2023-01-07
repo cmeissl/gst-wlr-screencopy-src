@@ -26,6 +26,7 @@ once_cell = "1.0"
 wayland-client = "0.30"
 wayland-protocols = {version = "0.30", features = ["client", "unstable"]}
 wayland-protocols-wlr = {version = "0.1", features = ["client"]}
+dma-heap = "0.2"
 
 [build-dependencies]
 gst-plugin-version-helper = "0.7"
