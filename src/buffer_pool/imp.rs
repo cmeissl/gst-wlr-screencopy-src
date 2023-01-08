@@ -4,7 +4,7 @@ use gstreamer::glib;
 use gstreamer::prelude::Cast;
 use gstreamer::subclass::prelude::*;
 
-use gstreamer_video::{VideoInfo};
+use gstreamer_video::{VideoInfo, VideoBufferPoolConfig};
 use once_cell::sync::Lazy;
 use wayland_client::backend::{ObjectData, ObjectId};
 use wayland_client::{Proxy, WEnum};
@@ -61,7 +61,7 @@ impl GstObjectImpl for WaylandBufferPool {}
 
 impl BufferPoolImpl for WaylandBufferPool {
     fn options() -> &'static [&'static str] {
-        static OPTIONS: Lazy<Vec<&'static str>> = Lazy::new(|| vec![*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META]);
+        static OPTIONS: Lazy<Vec<&'static str>> = Lazy::new(|| vec![*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META, *gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT]);
 
         OPTIONS.as_ref()
     }
@@ -219,7 +219,7 @@ impl BufferPoolImpl for WaylandBufferPool {
             }
         };
 
-        let video_info = match VideoInfo::from_caps(&caps) {
+        let mut video_info = match VideoInfo::from_caps(&caps) {
             Ok(info) => info,
             Err(err) => {
                 gstreamer::warning!(
@@ -231,33 +231,53 @@ impl BufferPoolImpl for WaylandBufferPool {
                 return false;
             }
         };
-
-        let mut guard = self.state.lock().unwrap();
-
-        guard.add_video_meta = config.has_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META);
-
-        let video_info_size = video_info.size();
-        if (size as usize) < video_info_size {
-            gstreamer::warning!(
-                CAT,
-                imp: self,
-                "provided size is to small for the caps {} < {}",
-                size,
-                video_info_size,
-            );
-            return false;
-        }
-
-        let (allocator, allocation_params) = if let Some((allocator, allocation_params)) = config.allocator() {
+                
+        let (allocator, mut allocation_params) = if let Some((allocator, allocation_params)) = config.allocator() {
             let allocator = allocator.unwrap_or_else(|| MemfdMemoryAllocator::default().upcast());
             (allocator, Some(allocation_params))
         } else {
             (MemfdMemoryAllocator::default().upcast(), None)
         };
 
+        let mut guard = self.state.lock().unwrap();
+        guard.add_video_meta = config.has_option(gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META.as_ref());
+        let need_alignment = config.has_option(gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT.as_ref());
+
+        if need_alignment && guard.add_video_meta {
+            let video_align = config.video_alignment();
+
+            if let Some(video_align) = video_align {
+                let align = allocation_params.as_ref().map(|params| params.align()).unwrap_or_default();
+                let mut max_align = align;
+
+                for plane in 0..video_info.n_planes() {
+                    max_align |= unsafe { *video_align.stride_align().get_unchecked(plane as usize) as usize };
+                }
+
+                let mut stride_align: [u32; gstreamer_video::ffi::GST_VIDEO_MAX_PLANES as usize] = [0; gstreamer_video::ffi::GST_VIDEO_MAX_PLANES as usize];
+                for plane in 0..video_info.n_planes() {
+                    stride_align[plane as usize] = max_align as u32;
+                }
+
+                let mut video_align = gstreamer_video::VideoAlignment::new(video_align.padding_top(), video_align.padding_bottom(), video_align.padding_left(), video_align.padding_right(), &stride_align);
+                if let Err(err) = video_info.align(&mut video_align) {
+                    gstreamer::warning!(CAT, imp: self, "failed to align video info: {}", err);
+                    return false;
+                }
+
+                config.set_video_alignment(&video_align);
+
+                if align < max_align {
+                    gstreamer::warning!(CAT, imp: self, "allocation params alignment {} is smaller than the max specified video stride alignment {}, fixing", align, max_align);
+                    allocation_params = allocation_params.as_ref().map(|params| gstreamer::AllocationParams::new(params.flags(), max_align, params.prefix(), params.padding()));
+                    config.set_allocator(Some(&allocator), allocation_params.as_ref());
+                }
+            }
+        }
+
+        let size = std::cmp::max(size, video_info.size() as u32);
         guard.video_info = Some(video_info);
 
-        config.set_allocator(Some(&allocator), allocation_params.as_ref());
         config.set_params(
             Some(&caps),
             size,

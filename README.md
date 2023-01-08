@@ -6,15 +6,6 @@ WIP
 
 ### Software Encoding
 
-#### With dma-buf
-
-```sh
-export GST_PLUGIN_PATH="$PWD/target/debug"
-gst-launch-1.0 wlrscreencopysrc display="wayland-1" ! glupload ! glcolorconvert ! gldownload ! openh264enc ! openh264dec ! videoconvert ! queue ! waylandsink
-```
-
-### Shm based
-
 ```sh
 export GST_PLUGIN_PATH="$PWD/target/debug"
 gst-launch-1.0 wlrscreencopysrc display="wayland-1" ! videoconvert ! openh264enc ! openh264dec ! videoconvert ! queue ! waylandsink
@@ -24,7 +15,7 @@ gst-launch-1.0 wlrscreencopysrc display="wayland-1" ! videoconvert ! openh264enc
 
 ```sh
 export GST_PLUGIN_PATH="$PWD/target/debug"
-gst-launch-1.0 wlrscreencopysrc display="wayland-1" ! glupload ! glcolorconvert ! gldownload ! vaapih264enc ! vaapih264dec ! vaapipostproc ! queue ! waylandsink
+gst-launch-1.0 wlrscreencopysrc display="wayland-1" ! vaapipostproc ! vaapih264enc ! vaapih264dec ! vaapipostproc ! queue ! waylandsink
 ```
 
 ### Gstreamer VA (plugins-bad)

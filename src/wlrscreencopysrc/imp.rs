@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use gstreamer::prelude::{Cast, ParamSpecBuilderExt, ToValue};
 use gstreamer_base::traits::BaseSrcExt;
+use gstreamer_video::VideoBufferPoolConfig;
 use once_cell::sync::Lazy;
 
 use gstreamer::subclass::prelude::*;
@@ -19,7 +20,16 @@ use crate::allocators::{DmaHeapMemoryAllocator, GbmMemoryAllocator, MemfdMemoryA
 use crate::buffer_pool::{WaylandBufferMeta, WaylandBufferPool};
 use crate::utils::{
     gst_video_format_from_drm_fourcc, gst_video_format_from_wl_shm, gst_video_format_to_drm_fourcc,
+    gst_video_format_to_wl_shm,
 };
+
+static CAT: Lazy<gstreamer::DebugCategory> = Lazy::new(|| {
+    gstreamer::DebugCategory::new(
+        "wlrscreencopysrc",
+        gstreamer::DebugColorFlags::empty(),
+        Some("wlr-screencopy src"),
+    )
+});
 
 #[derive(Debug, Default)]
 struct Settings {
@@ -592,7 +602,6 @@ impl BaseSrcImpl for WlrScreencopySrc {
                         continue;
                     };
                     let dmabuf_format_caps = gstreamer_video::video_make_raw_caps(&[format])
-                        .features(&[*gstreamer_allocators::CAPS_FEATURE_MEMORY_DMABUF])
                         .width(dmabuf_format.width as i32)
                         .height(dmabuf_format.height as i32)
                         .framerate_range(..output_refresh)
@@ -601,7 +610,6 @@ impl BaseSrcImpl for WlrScreencopySrc {
                 }
 
                 for shm_format in frame_info.shm_formats.iter() {
-                    dbg!(shm_format);
                     let Some(format) = gst_video_format_from_wl_shm(shm_format.format) else {
                         continue;
                     };
@@ -625,7 +633,7 @@ impl BaseSrcImpl for WlrScreencopySrc {
     }
 
     fn set_caps(&self, caps: &gstreamer::Caps) -> Result<(), gstreamer::LoggableError> {
-        self.parent_set_caps(dbg!(caps))
+        self.parent_set_caps(caps)
     }
 
     fn decide_allocation(
@@ -655,39 +663,67 @@ impl BaseSrcImpl for WlrScreencopySrc {
 
         let buffer_pool = WaylandBufferPool::new(&state.wl_shm, state.dmabuf.as_ref());
         let use_dmabuf_allocator = is_dmabuf_format && state.dmabuf.is_some();
-        let allocator = if use_dmabuf_allocator {
-            if DmaHeapMemoryAllocator::is_available() {
+        let (allocator, allocation_params, video_align) = if use_dmabuf_allocator {
+            gstreamer::debug!(CAT, imp: self, "using dmabuf format");
+
+            let allocator = if DmaHeapMemoryAllocator::is_available() {
+                gstreamer::debug!(CAT, imp: self, "using dma-buf heap allocator");
                 DmaHeapMemoryAllocator::default().upcast()
             } else {
+                gstreamer::debug!(CAT, imp: self, "using gbm allocator");
                 GbmMemoryAllocator::default().upcast()
-            }
+            };
+            // If we use dmabuf memory with a hardware encoder we need to align the memory
+            // An alignment of 32bytes should work for most encoders
+            let allocation_params =
+                gstreamer::AllocationParams::new(gstreamer::MemoryFlags::empty(), 127, 0, 0);
+            let video_align = gstreamer_video::VideoAlignment::new(0, 0, 0, 0, &[31, 0, 0, 0]);
+            (allocator, Some(allocation_params), Some(video_align))
         } else {
-            MemfdMemoryAllocator::default().upcast()
+            gstreamer::debug!(CAT, imp: self, "using shm format");
+
+            let shm_format = state
+                .current_frame
+                .as_ref()
+                .map(|(_, frame_info)| {
+                    let format = gst_video_format_to_wl_shm(video_info.format()).unwrap();
+                    frame_info
+                        .shm_formats
+                        .iter()
+                        .find(|shm_format| shm_format.format == format)
+                        .unwrap()
+                })
+                .unwrap();
+
+            if video_info.stride()[0] != shm_format.stride as i32 {
+                unimplemented!()
+            }
+
+            gstreamer::debug!(CAT, imp: self, "using memfd allocator");
+            (MemfdMemoryAllocator::default().upcast(), None, None)
         };
 
         if let Some((_, _, min, max)) = query.allocation_pools().get(0) {
             let mut config = buffer_pool.config();
-            config.set_allocator(Some(&allocator), None);
-            if query
-                .find_allocation_meta::<gstreamer_video::VideoMeta>()
-                .is_some()
-            {
-                config.add_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META);
+            config.set_allocator(Some(&allocator), allocation_params.as_ref());
+            config.add_option(gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META.as_ref());
+            if let Some(video_align) = video_align.as_ref() {
+                config.add_option(gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT.as_ref());
+                config.set_video_alignment(video_align);
             }
             let size = video_info.size() as u32;
             config.set_params(Some(&caps), size, *min, *max);
             buffer_pool
                 .set_config(config)
                 .expect("failed to set config");
-            query.set_nth_allocation_pool(0, Some(&buffer_pool), size, 0, 0);
+            query.set_nth_allocation_pool(0, Some(&buffer_pool), size, *min, *max);
         } else {
             let mut config = buffer_pool.config();
-            config.set_allocator(Some(&allocator), None);
-            if query
-                .find_allocation_meta::<gstreamer_video::VideoMeta>()
-                .is_some()
-            {
-                config.add_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META);
+            config.set_allocator(Some(&allocator), allocation_params.as_ref());
+            config.add_option(gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META.as_ref());
+            if let Some(video_align) = video_align.as_ref() {
+                config.add_option(gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT.as_ref());
+                config.set_video_alignment(video_align);
             }
             let (caps, _) = query.get_owned();
             let video_info =

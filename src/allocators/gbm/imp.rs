@@ -1,3 +1,4 @@
+use std::os::fd::AsRawFd;
 use std::os::unix::io::{AsFd, BorrowedFd};
 use std::sync::Mutex;
 
@@ -5,7 +6,10 @@ use gstreamer::glib;
 use gstreamer::prelude::{Cast, ParamSpecBuilderExt, ToValue};
 use gstreamer::subclass::prelude::*;
 use gstreamer_allocators::DmaBufAllocator;
+use nix::unistd;
 use once_cell::sync::Lazy;
+
+use crate::utils::gst_video_format_to_drm_fourcc;
 
 /// A simple wrapper for a device node.
 #[derive(Debug)]
@@ -52,16 +56,8 @@ impl GbmMemoryAllocator {
         let guard = self.device.lock().unwrap();
         let device = guard.as_ref().unwrap();
 
-        let format = match video_info.format() {
-            gstreamer_video::VideoFormat::Abgr => drm_fourcc::DrmFourcc::Abgr8888,
-            gstreamer_video::VideoFormat::Argb => drm_fourcc::DrmFourcc::Argb8888,
-            gstreamer_video::VideoFormat::Bgra => drm_fourcc::DrmFourcc::Bgra8888,
-            gstreamer_video::VideoFormat::Bgrx => drm_fourcc::DrmFourcc::Bgrx8888,
-            gstreamer_video::VideoFormat::Rgba => drm_fourcc::DrmFourcc::Rgba8888,
-            gstreamer_video::VideoFormat::Rgbx => drm_fourcc::DrmFourcc::Rgbx8888,
-            gstreamer_video::VideoFormat::Xbgr => drm_fourcc::DrmFourcc::Xbgr8888,
-            gstreamer_video::VideoFormat::Xrgb => drm_fourcc::DrmFourcc::Xrgb8888,
-            _ => panic!("unsupported format"),
+        let Some(format) = gst_video_format_to_drm_fourcc(video_info.format()) else {
+            unreachable!()
         };
 
         let bo = device
@@ -74,6 +70,13 @@ impl GbmMemoryAllocator {
             )
             .expect("failed to create bo");
         let fd = bo.fd().expect("no fd");
+        
+        let fd_size = unistd::lseek(fd.as_raw_fd(), 0, unistd::Whence::SeekEnd).unwrap();
+        let _ = unistd::lseek(fd.as_raw_fd(), 0, unistd::Whence::SeekSet);
+
+        if (fd_size as usize) < video_info.size() {
+            panic!("bo too small");
+        }
 
         let memory = unsafe {
             dmabuf_allocator
