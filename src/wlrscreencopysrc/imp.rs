@@ -12,13 +12,14 @@ use gstreamer::{glib, prelude::BufferPoolExtManual};
 use gstreamer_base::subclass::prelude::*;
 
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
-use wayland_client::protocol::wl_shm;
 use wayland_client::{protocol::wl_registry, Connection, Dispatch, Proxy};
 use wayland_client::{QueueHandle, Weak};
 
 use crate::allocators::{DmaHeapMemoryAllocator, GbmMemoryAllocator, MemfdMemoryAllocator};
 use crate::buffer_pool::{WaylandBufferMeta, WaylandBufferPool};
-use crate::utils::{gst_video_format_from_wl_shm, gst_video_format_from_drm_fourcc, gst_video_format_to_drm_fourcc};
+use crate::utils::{
+    gst_video_format_from_drm_fourcc, gst_video_format_from_wl_shm, gst_video_format_to_drm_fourcc,
+};
 
 #[derive(Debug, Default)]
 struct Settings {
