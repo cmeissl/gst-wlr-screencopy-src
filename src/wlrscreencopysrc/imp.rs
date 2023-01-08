@@ -484,6 +484,7 @@ impl ObjectImpl for WlrScreencopySrc {
         let obj = self.obj();
         obj.set_live(true);
         obj.set_format(gstreamer::Format::Time);
+        obj.set_automatic_eos(false);
         // Replace this with frame finish timestamp
         obj.set_do_timestamp(true);
     }

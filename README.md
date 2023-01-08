@@ -33,6 +33,18 @@ export GST_PLUGIN_PATH="$PWD/target/debug"
 gst-launch-1.0 wlrscreencopysrc display="wayland-1" ! glupload ! glcolorconvert ! gldownload ! vah264enc ! vah264dec ! vapostproc ! queue ! waylandsink
 ```
 
-#### Recording
+### Recording
 
-TODO
+Recording ~10s from output with 60Hz
+
+#### Software
+
+```sh
+gst-launch-1.0 -m wlrscreencopysrc display="wayland-1" num-buffers=600 ! vaapipostproc ! vaapih264enc ! h264parse ! mp4mux ! filesink location="record.mp4"
+```
+
+#### VA-API
+
+```sh
+gst-launch-1.0 -m wlrscreencopysrc display="wayland-1" num-buffers=600 ! videoconvert ! openh264enc ! h264parse ! mp4mux ! filesink location="record.mp4"
+```
