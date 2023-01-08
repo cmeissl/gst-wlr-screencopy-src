@@ -4,7 +4,7 @@ use gstreamer::glib;
 use gstreamer::prelude::Cast;
 use gstreamer::subclass::prelude::*;
 
-use gstreamer_video::{VideoInfo, VideoBufferPoolConfig};
+use gstreamer_video::{VideoInfo};
 use once_cell::sync::Lazy;
 use wayland_client::backend::{ObjectData, ObjectId};
 use wayland_client::protocol::wl_shm;
@@ -61,7 +61,7 @@ impl GstObjectImpl for WaylandBufferPool {}
 
 impl BufferPoolImpl for WaylandBufferPool {
     fn options() -> &'static [&'static str] {
-        static OPTIONS: Lazy<Vec<&'static str>> = Lazy::new(|| vec![*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META, *gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT]);
+        static OPTIONS: Lazy<Vec<&'static str>> = Lazy::new(|| vec![*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META]);
 
         OPTIONS.as_ref()
     }
@@ -139,18 +139,20 @@ impl BufferPoolImpl for WaylandBufferPool {
 
             let buffer_mut = buffer.make_mut();
             super::meta::WaylandBufferMeta::add(buffer_mut, wl_buffer);
-            gstreamer_video::VideoMeta::add_full(
-                buffer_mut,
-                gstreamer_video::VideoFrameFlags::empty(),
-                video_info.format(),
-                video_info.width(),
-                video_info.height(),
-                video_info.offset(),
-                video_info.stride(),
-            ).map_err(|err| {
-                gstreamer::warning!(CAT, imp: self, "failed to add video meta: {:?}", err);
-                gstreamer::FlowError::Error
-            })?;
+            if state.add_video_meta {
+                gstreamer_video::VideoMeta::add_full(
+                    buffer_mut,
+                    gstreamer_video::VideoFrameFlags::empty(),
+                    video_info.format(),
+                    video_info.width(),
+                    video_info.height(),
+                    video_info.offset(),
+                    video_info.stride(),
+                ).map_err(|err| {
+                    gstreamer::warning!(CAT, imp: self, "failed to add video meta: {:?}", err);
+                    gstreamer::FlowError::Error
+                })?;
+            }
             buffer_mut.unset_flags(gstreamer::BufferFlags::TAG_MEMORY);
 
             return Ok(buffer);
@@ -199,18 +201,20 @@ impl BufferPoolImpl for WaylandBufferPool {
             
             let buffer_mut = buffer.make_mut();
             super::meta::WaylandBufferMeta::add(buffer_mut, wl_buffer);
-            gstreamer_video::VideoMeta::add_full(
-                buffer_mut,
-                gstreamer_video::VideoFrameFlags::empty(),
-                video_info.format(),
-                video_info.width(),
-                video_info.height(),
-                video_info.offset(),
-                video_info.stride(),
-            ).map_err(|err| {
-                gstreamer::warning!(CAT, imp: self, "failed to add video meta: {:?}", err);
-                gstreamer::FlowError::Error
-            })?;
+            if state.add_video_meta {
+                gstreamer_video::VideoMeta::add_full(
+                    buffer_mut,
+                    gstreamer_video::VideoFrameFlags::empty(),
+                    video_info.format(),
+                    video_info.width(),
+                    video_info.height(),
+                    video_info.offset(),
+                    video_info.stride(),
+                ).map_err(|err| {
+                    gstreamer::warning!(CAT, imp: self, "failed to add video meta: {:?}", err);
+                    gstreamer::FlowError::Error
+                })?;
+            }
             buffer_mut.unset_flags(gstreamer::BufferFlags::TAG_MEMORY);
             return Ok(buffer);
         }
@@ -235,7 +239,7 @@ impl BufferPoolImpl for WaylandBufferPool {
             }
         };
 
-        let mut video_info = match VideoInfo::from_caps(&caps) {
+        let video_info = match VideoInfo::from_caps(&caps) {
             Ok(info) => info,
             Err(err) => {
                 gstreamer::warning!(
@@ -250,24 +254,7 @@ impl BufferPoolImpl for WaylandBufferPool {
 
         let mut guard = self.state.lock().unwrap();
 
-        let need_alignment = config.has_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT);
         guard.add_video_meta = config.has_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META);
-
-        if need_alignment && guard.add_video_meta {
-            let video_alignment = config.video_alignment();
-            
-            if let Some(mut video_alignment) = video_alignment {
-                if let Err(err) = video_info.align(&mut video_alignment) {
-                    gstreamer::warning!(
-                        CAT,
-                        imp: self,
-                        "failed to align {}",
-                        err,
-                    );
-                    return false;
-                } 
-            }
-        }
 
         let video_info_size = video_info.size();
         if (size as usize) < video_info_size {

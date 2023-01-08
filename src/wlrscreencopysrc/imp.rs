@@ -5,7 +5,6 @@ use std::sync::Mutex;
 
 use gstreamer::prelude::{Cast, ParamSpecBuilderExt, ToValue};
 use gstreamer_base::traits::BaseSrcExt;
-use gstreamer_video::VideoBufferPoolConfig;
 use once_cell::sync::Lazy;
 
 use gstreamer::subclass::prelude::*;
@@ -528,7 +527,7 @@ impl ElementImpl for WlrScreencopySrc {
                 settings.wayland_display.as_deref(),
                 settings.output_name.as_deref(),
             );
-            return Ok(gstreamer::StateChangeSuccess::Success);
+            return Ok(gstreamer::StateChangeSuccess::Async);
         }
 
         self.parent_change_state(transition)
@@ -540,6 +539,10 @@ impl ElementImpl for WlrScreencopySrc {
 }
 
 impl BaseSrcImpl for WlrScreencopySrc {
+    fn query(&self, query: &mut gstreamer::QueryRef) -> bool {
+        BaseSrcImplExt::parent_query(self, query)
+    }
+
     fn caps(&self, filter: Option<&gstreamer::Caps>) -> Option<gstreamer::Caps> {
         let wayland_state = self.wayland_state.lock().unwrap();
 
@@ -595,6 +598,7 @@ impl BaseSrcImpl for WlrScreencopySrc {
                         _ => continue,
                     };
                     let dmabuf_format_caps = gstreamer_video::video_make_raw_caps(&[format])
+                        .features(&[*gstreamer_allocators::CAPS_FEATURE_MEMORY_DMABUF])
                         .width(dmabuf_format.width as i32)
                         .height(dmabuf_format.height as i32)
                         .framerate_range(..output_refresh)
@@ -614,6 +618,7 @@ impl BaseSrcImpl for WlrScreencopySrc {
                         wl_shm::Format::Xrgb8888 => gstreamer_video::VideoFormat::Xrgb,
                         _ => continue,
                     };
+
                     let shm_format_caps = gstreamer_video::video_make_raw_caps(&[format])
                         .width(shm_format.width as i32)
                         .height(shm_format.height as i32)
@@ -634,7 +639,7 @@ impl BaseSrcImpl for WlrScreencopySrc {
     }
 
     fn set_caps(&self, caps: &gstreamer::Caps) -> Result<(), gstreamer::LoggableError> {
-        self.parent_set_caps(dbg!(caps))
+        self.parent_set_caps(caps)
     }
 
     fn decide_allocation(
@@ -682,51 +687,8 @@ impl BaseSrcImpl for WlrScreencopySrc {
         } else {
             MemfdMemoryAllocator::default().upcast()
         };
-        let video_align = if use_dmabuf_allocator {
-            // FIXME: So, it seems if we provide a dmabuf to a encoder
-            // it requires the buffer to be aligned.
-            // Aligning the plane to 4 pixels seems to work...
-            Some(gstreamer_video::VideoAlignment::new(
-                0,
-                0,
-                0,
-                0,
-                &[4, 0, 0, 0],
-            ))
-        } else {
-            let format = match video_info.format() {
-                gstreamer_video::VideoFormat::Abgr => wl_shm::Format::Abgr8888,
-                gstreamer_video::VideoFormat::Argb => wl_shm::Format::Argb8888,
-                gstreamer_video::VideoFormat::Bgra => wl_shm::Format::Bgra8888,
-                gstreamer_video::VideoFormat::Bgrx => wl_shm::Format::Bgrx8888,
-                gstreamer_video::VideoFormat::Rgba => wl_shm::Format::Rgba8888,
-                gstreamer_video::VideoFormat::Rgbx => wl_shm::Format::Rgbx8888,
-                gstreamer_video::VideoFormat::Xbgr => wl_shm::Format::Xbgr8888,
-                gstreamer_video::VideoFormat::Xrgb => wl_shm::Format::Xrgb8888,
-                _ => unreachable!(),
-            };
-            let stride = state
-                .current_frame
-                .as_ref()
-                .map(|(_, frame_info)| {
-                    frame_info
-                        .shm_formats
-                        .iter()
-                        .find(|shm_format| shm_format.format == format)
-                        .map(|shm_format| shm_format.stride)
-                        .unwrap()
-                })
-                .unwrap();
 
-            if video_info.stride()[0] != stride as i32 {
-                // FIXME: Calculate the stride alignment
-                unimplemented!()
-            }
-
-            None
-        };
-
-        if let Some((_, size, min, max)) = query.allocation_pools().get(0) {
+        if let Some((_, _, min, max)) = query.allocation_pools().get(0) {
             let mut config = buffer_pool.config();
             config.set_allocator(Some(&allocator), None);
             if query
@@ -735,11 +697,7 @@ impl BaseSrcImpl for WlrScreencopySrc {
             {
                 config.add_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META);
             }
-            if let Some(video_align) = video_align {
-                config.add_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT);
-                config.set_video_alignment(&video_align);
-            }
-            let size = std::cmp::max(*size, video_info.size() as u32);
+            let size = video_info.size() as u32;
             config.set_params(Some(&caps), size, *min, *max);
             buffer_pool
                 .set_config(config)
@@ -755,13 +713,8 @@ impl BaseSrcImpl for WlrScreencopySrc {
                 config.add_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META);
             }
             let (caps, _) = query.get_owned();
-            let mut video_info =
+            let video_info =
                 gstreamer_video::VideoInfo::from_caps(&caps).expect("failed to get video info");
-            if let Some(mut video_align) = video_align {
-                config.add_option(*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT);
-                config.set_video_alignment(&video_align);
-                let _ = video_info.align(&mut video_align);
-            }
             config.set_params(Some(&caps), video_info.size() as u32, 0, 0);
             buffer_pool
                 .set_config(config)

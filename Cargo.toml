@@ -14,12 +14,12 @@ path = "src/lib.rs"
 [dependencies]
 drm-fourcc = "2.2"
 gbm = "0.11"
-gstreamer = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
+gstreamer = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators", features = ["v1_18"]}
 gstreamer-allocators = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
 gstreamer-base = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
 gstreamer-base-sys = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
 gstreamer-sys = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
-gstreamer-video = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators"}
+gstreamer-video = {version = "0.20", git = "https://gitlab.freedesktop.org/cmeissl/gstreamer-rs.git", branch = "subclass_allocators", features = ["v1_18"]}
 memfd = "0.6"
 nix = "0.26"
 once_cell = "1.0"
@@ -32,7 +32,7 @@ dma-heap = "0.2"
 gst-plugin-version-helper = "0.7"
 
 [features]
-capi = []
+capi = ["gstreamer/v1_18"]
 doc = ["gstreamer/v1_18"]
 static = []
 
