@@ -18,6 +18,7 @@ use wayland_client::{QueueHandle, Weak};
 
 use crate::allocators::{DmaHeapMemoryAllocator, GbmMemoryAllocator, MemfdMemoryAllocator};
 use crate::buffer_pool::{WaylandBufferMeta, WaylandBufferPool};
+use crate::utils::{gst_video_format_from_wl_shm, gst_video_format_from_drm_fourcc, gst_video_format_to_drm_fourcc};
 
 #[derive(Debug, Default)]
 struct Settings {
@@ -586,16 +587,8 @@ impl BaseSrcImpl for WlrScreencopySrc {
                 let mut caps = gstreamer::Caps::new_empty();
 
                 for dmabuf_format in frame_info.dmabuf_formats.iter() {
-                    let format = match dmabuf_format.format {
-                        drm_fourcc::DrmFourcc::Abgr8888 => gstreamer_video::VideoFormat::Abgr,
-                        drm_fourcc::DrmFourcc::Argb8888 => gstreamer_video::VideoFormat::Argb,
-                        drm_fourcc::DrmFourcc::Bgra8888 => gstreamer_video::VideoFormat::Bgra,
-                        drm_fourcc::DrmFourcc::Bgrx8888 => gstreamer_video::VideoFormat::Bgrx,
-                        drm_fourcc::DrmFourcc::Rgba8888 => gstreamer_video::VideoFormat::Rgba,
-                        drm_fourcc::DrmFourcc::Rgbx8888 => gstreamer_video::VideoFormat::Rgbx,
-                        drm_fourcc::DrmFourcc::Xbgr8888 => gstreamer_video::VideoFormat::Xbgr,
-                        drm_fourcc::DrmFourcc::Xrgb8888 => gstreamer_video::VideoFormat::Xrgb,
-                        _ => continue,
+                    let Some(format) = gst_video_format_from_drm_fourcc(dmabuf_format.format) else {
+                        continue;
                     };
                     let dmabuf_format_caps = gstreamer_video::video_make_raw_caps(&[format])
                         .features(&[*gstreamer_allocators::CAPS_FEATURE_MEMORY_DMABUF])
@@ -607,18 +600,10 @@ impl BaseSrcImpl for WlrScreencopySrc {
                 }
 
                 for shm_format in frame_info.shm_formats.iter() {
-                    let format = match shm_format.format {
-                        wl_shm::Format::Abgr8888 => gstreamer_video::VideoFormat::Abgr,
-                        wl_shm::Format::Argb8888 => gstreamer_video::VideoFormat::Argb,
-                        wl_shm::Format::Bgra8888 => gstreamer_video::VideoFormat::Bgra,
-                        wl_shm::Format::Bgrx8888 => gstreamer_video::VideoFormat::Bgrx,
-                        wl_shm::Format::Rgba8888 => gstreamer_video::VideoFormat::Rgba,
-                        wl_shm::Format::Rgbx8888 => gstreamer_video::VideoFormat::Rgbx,
-                        wl_shm::Format::Xbgr8888 => gstreamer_video::VideoFormat::Xbgr,
-                        wl_shm::Format::Xrgb8888 => gstreamer_video::VideoFormat::Xrgb,
-                        _ => continue,
+                    dbg!(shm_format);
+                    let Some(format) = gst_video_format_from_wl_shm(shm_format.format) else {
+                        continue;
                     };
-
                     let shm_format_caps = gstreamer_video::video_make_raw_caps(&[format])
                         .width(shm_format.width as i32)
                         .height(shm_format.height as i32)
@@ -639,7 +624,7 @@ impl BaseSrcImpl for WlrScreencopySrc {
     }
 
     fn set_caps(&self, caps: &gstreamer::Caps) -> Result<(), gstreamer::LoggableError> {
-        self.parent_set_caps(caps)
+        self.parent_set_caps(dbg!(caps))
     }
 
     fn decide_allocation(
@@ -657,18 +642,9 @@ impl BaseSrcImpl for WlrScreencopySrc {
             .current_frame
             .as_ref()
             .map(|(_, frame_info)| {
-                let format = match video_info.format() {
-                    gstreamer_video::VideoFormat::Abgr => drm_fourcc::DrmFourcc::Abgr8888,
-                    gstreamer_video::VideoFormat::Argb => drm_fourcc::DrmFourcc::Argb8888,
-                    gstreamer_video::VideoFormat::Bgra => drm_fourcc::DrmFourcc::Bgra8888,
-                    gstreamer_video::VideoFormat::Bgrx => drm_fourcc::DrmFourcc::Bgrx8888,
-                    gstreamer_video::VideoFormat::Rgba => drm_fourcc::DrmFourcc::Rgba8888,
-                    gstreamer_video::VideoFormat::Rgbx => drm_fourcc::DrmFourcc::Rgbx8888,
-                    gstreamer_video::VideoFormat::Xbgr => drm_fourcc::DrmFourcc::Xbgr8888,
-                    gstreamer_video::VideoFormat::Xrgb => drm_fourcc::DrmFourcc::Xrgb8888,
-                    _ => return false,
+                let Some(format) = gst_video_format_to_drm_fourcc(video_info.format()) else {
+                    return false
                 };
-
                 frame_info
                     .dmabuf_formats
                     .iter()

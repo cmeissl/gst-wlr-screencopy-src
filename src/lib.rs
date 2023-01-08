@@ -5,6 +5,7 @@ use gstreamer::glib;
 mod allocators;
 mod buffer_pool;
 mod wlrscreencopysrc;
+mod utils;
 
 fn plugin_init(plugin: &gstreamer::Plugin) -> Result<(), glib::BoolError> {
     wlrscreencopysrc::register(plugin)

@@ -7,10 +7,10 @@ use gstreamer::subclass::prelude::*;
 use gstreamer_video::{VideoInfo};
 use once_cell::sync::Lazy;
 use wayland_client::backend::{ObjectData, ObjectId};
-use wayland_client::protocol::wl_shm;
 use wayland_client::{Proxy, WEnum};
 
 use crate::allocators::{GbmMemoryAllocator, MemfdMemoryAllocator};
+use crate::utils::{gst_video_format_to_wl_shm, gst_video_format_to_drm_fourcc};
 
 static CAT: Lazy<gstreamer::DebugCategory> = Lazy::new(|| {
     gstreamer::DebugCategory::new(
@@ -113,19 +113,9 @@ impl BufferPoolImpl for WaylandBufferPool {
                 );
             }
 
-            let format = match video_info.format() {
-                gstreamer_video::VideoFormat::Abgr => drm_fourcc::DrmFourcc::Abgr8888,
-                gstreamer_video::VideoFormat::Argb => drm_fourcc::DrmFourcc::Argb8888,
-                gstreamer_video::VideoFormat::Bgra => drm_fourcc::DrmFourcc::Bgra8888,
-                gstreamer_video::VideoFormat::Bgrx => drm_fourcc::DrmFourcc::Bgrx8888,
-                gstreamer_video::VideoFormat::Rgba => drm_fourcc::DrmFourcc::Rgba8888,
-                gstreamer_video::VideoFormat::Rgbx => drm_fourcc::DrmFourcc::Rgbx8888,
-                gstreamer_video::VideoFormat::Xbgr => drm_fourcc::DrmFourcc::Xbgr8888,
-                gstreamer_video::VideoFormat::Xrgb => drm_fourcc::DrmFourcc::Xrgb8888,
-                _ => {
-                    params.destroy();
-                    return Err(gstreamer::FlowError::Error);
-                }
+            let Some(format) = gst_video_format_to_drm_fourcc(video_info.format()) else {
+                params.destroy();
+                return Err(gstreamer::FlowError::Error);
             };
             let wl_buffer = params.send_constructor::<wayland_client::protocol::wl_buffer::WlBuffer>(
                 wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::Request::CreateImmed { 
@@ -170,19 +160,9 @@ impl BufferPoolImpl for WaylandBufferPool {
                 )
                 .expect("failed to create pool");
 
-            let format = match video_info.format() {
-                gstreamer_video::VideoFormat::Abgr => wl_shm::Format::Abgr8888,
-                gstreamer_video::VideoFormat::Argb => wl_shm::Format::Argb8888,
-                gstreamer_video::VideoFormat::Bgra => wl_shm::Format::Bgra8888,
-                gstreamer_video::VideoFormat::Bgrx => wl_shm::Format::Bgrx8888,
-                gstreamer_video::VideoFormat::Rgba => wl_shm::Format::Rgba8888,
-                gstreamer_video::VideoFormat::Rgbx => wl_shm::Format::Rgbx8888,
-                gstreamer_video::VideoFormat::Xbgr => wl_shm::Format::Xbgr8888,
-                gstreamer_video::VideoFormat::Xrgb => wl_shm::Format::Xrgb8888,
-                _ => {
-                    pool.destroy();
+            let Some(format) = gst_video_format_to_wl_shm(video_info.format()) else {
+                pool.destroy();
                     return Err(gstreamer::FlowError::Error);
-                }
             };
 
             let wl_buffer = pool
