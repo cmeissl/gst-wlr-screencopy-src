@@ -4,14 +4,14 @@ use wayland_client::protocol::wl_shm;
 
 pub fn gst_video_format_from_wl_shm(format: wl_shm::Format) -> Option<VideoFormat> {
     let format = match format {
-        wl_shm::Format::Abgr8888 => VideoFormat::Abgr,
-        wl_shm::Format::Argb8888 => VideoFormat::Argb,
-        wl_shm::Format::Bgra8888 => VideoFormat::Bgra,
-        wl_shm::Format::Bgrx8888 => VideoFormat::Bgrx,
-        wl_shm::Format::Rgba8888 => VideoFormat::Rgba,
-        wl_shm::Format::Rgbx8888 => VideoFormat::Rgbx,
-        wl_shm::Format::Xbgr8888 => VideoFormat::Xbgr,
-        wl_shm::Format::Xrgb8888 => VideoFormat::Xrgb,
+        wl_shm::Format::Abgr8888 => VideoFormat::Rgba,
+        wl_shm::Format::Argb8888 => VideoFormat::Bgra,
+        wl_shm::Format::Bgra8888 => VideoFormat::Argb,
+        wl_shm::Format::Bgrx8888 => VideoFormat::Xrgb,
+        wl_shm::Format::Rgba8888 => VideoFormat::Abgr,
+        wl_shm::Format::Rgbx8888 => VideoFormat::Xbgr,
+        wl_shm::Format::Xbgr8888 => VideoFormat::Rgbx,
+        wl_shm::Format::Xrgb8888 => VideoFormat::Bgrx,
         _ => return None,
     };
     Some(format)
@@ -19,14 +19,14 @@ pub fn gst_video_format_from_wl_shm(format: wl_shm::Format) -> Option<VideoForma
 
 pub fn gst_video_format_to_wl_shm(format: VideoFormat) -> Option<wl_shm::Format> {
     let format = match format {
-        VideoFormat::Abgr => wl_shm::Format::Abgr8888,
-        VideoFormat::Argb => wl_shm::Format::Argb8888,
-        VideoFormat::Bgra => wl_shm::Format::Bgra8888,
-        VideoFormat::Bgrx => wl_shm::Format::Bgrx8888,
-        VideoFormat::Rgba => wl_shm::Format::Rgba8888,
-        VideoFormat::Rgbx => wl_shm::Format::Rgbx8888,
-        VideoFormat::Xbgr => wl_shm::Format::Xbgr8888,
-        VideoFormat::Xrgb => wl_shm::Format::Xrgb8888,
+        VideoFormat::Abgr => wl_shm::Format::Rgba8888,
+        VideoFormat::Argb => wl_shm::Format::Bgra8888,
+        VideoFormat::Bgra => wl_shm::Format::Argb8888,
+        VideoFormat::Bgrx => wl_shm::Format::Xrgb8888,
+        VideoFormat::Rgba => wl_shm::Format::Abgr8888,
+        VideoFormat::Rgbx => wl_shm::Format::Xbgr8888,
+        VideoFormat::Xbgr => wl_shm::Format::Rgbx8888,
+        VideoFormat::Xrgb => wl_shm::Format::Bgrx8888,
         _ => return None,
     };
     Some(format)
