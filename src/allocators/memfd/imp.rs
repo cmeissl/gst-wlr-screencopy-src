@@ -3,7 +3,7 @@ use std::os::unix::io::IntoRawFd;
 use gstreamer::glib;
 use gstreamer::prelude::Cast;
 use gstreamer::subclass::prelude::*;
-use gstreamer_allocators::{FdAllocator, FdMemoryFlags};
+use gstreamer_allocators::{subclass::prelude::FdAllocatorImpl, FdAllocator, FdMemoryFlags};
 
 #[derive(Debug)]
 pub struct MemfdMemoryAllocator {
@@ -71,3 +71,5 @@ impl AllocatorImpl for MemfdMemoryAllocator {
         self.parent_free(memory)
     }
 }
+
+impl FdAllocatorImpl for MemfdMemoryAllocator {}

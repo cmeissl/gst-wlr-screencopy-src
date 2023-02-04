@@ -3,6 +3,7 @@ use std::os::unix::io::IntoRawFd;
 use gstreamer::glib;
 use gstreamer::prelude::Cast;
 use gstreamer::subclass::prelude::*;
+use gstreamer_allocators::subclass::prelude::*;
 use gstreamer_allocators::DmaBufAllocator;
 
 #[derive(Debug)]
@@ -56,3 +57,6 @@ impl AllocatorImpl for DmaHeapMemoryAllocator {
         self.parent_free(memory)
     }
 }
+
+impl DmaBufAllocatorImpl for DmaHeapMemoryAllocator {}
+impl FdAllocatorImpl for DmaHeapMemoryAllocator {}

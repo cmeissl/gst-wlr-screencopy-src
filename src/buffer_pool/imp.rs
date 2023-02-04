@@ -61,7 +61,7 @@ impl GstObjectImpl for WaylandBufferPool {}
 
 impl BufferPoolImpl for WaylandBufferPool {
     fn options() -> &'static [&'static str] {
-        static OPTIONS: Lazy<Vec<&'static str>> = Lazy::new(|| vec![*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META, *gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT]);
+        static OPTIONS: Lazy<Vec<&'static str>> = Lazy::new(|| vec![&*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_META, &*gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT]);
 
         OPTIONS.as_ref()
     }

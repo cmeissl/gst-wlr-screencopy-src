@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use gstreamer::glib;
 use gstreamer::prelude::{Cast, ParamSpecBuilderExt, ToValue};
 use gstreamer::subclass::prelude::*;
+use gstreamer_allocators::subclass::prelude::*;
 use gstreamer_allocators::DmaBufAllocator;
 use nix::unistd;
 use once_cell::sync::Lazy;
@@ -70,7 +71,7 @@ impl GbmMemoryAllocator {
             )
             .expect("failed to create bo");
         let fd = bo.fd().expect("no fd");
-        
+
         let fd_size = unistd::lseek(fd.as_raw_fd(), 0, unistd::Whence::SeekEnd).unwrap();
         let _ = unistd::lseek(fd.as_raw_fd(), 0, unistd::Whence::SeekSet);
 
@@ -141,4 +142,6 @@ impl ObjectImpl for GbmMemoryAllocator {
 
 impl GstObjectImpl for GbmMemoryAllocator {}
 
+impl DmaBufAllocatorImpl for GbmMemoryAllocator {}
+impl FdAllocatorImpl for GbmMemoryAllocator {}
 impl AllocatorImpl for GbmMemoryAllocator {}

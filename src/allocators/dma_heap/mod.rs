@@ -14,6 +14,6 @@ impl DmaHeapMemoryAllocator {
 
 impl Default for DmaHeapMemoryAllocator {
     fn default() -> Self {
-        glib::Object::new(&[])
+        glib::Object::new()
     }
 }

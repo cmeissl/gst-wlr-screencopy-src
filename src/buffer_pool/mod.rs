@@ -14,7 +14,7 @@ impl WaylandBufferPool {
         wl_shm: &wayland_client::protocol::wl_shm::WlShm,
         zwp_linux_dmabuf: Option<&wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1>,
     ) -> Self {
-        let obj: WaylandBufferPool = glib::Object::new(&[]);
+        let obj: WaylandBufferPool = glib::Object::new();
         let imp = obj.imp();
         let mut guard = imp.state.lock().unwrap();
         guard.wl_shm = Some(wl_shm.clone());

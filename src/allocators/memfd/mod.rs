@@ -8,6 +8,6 @@ glib::wrapper! {
 
 impl Default for MemfdMemoryAllocator {
     fn default() -> Self {
-        glib::Object::new(&[])
+        glib::Object::new()
     }
 }

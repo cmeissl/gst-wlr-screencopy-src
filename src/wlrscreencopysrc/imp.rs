@@ -512,7 +512,7 @@ impl ElementImpl for WlrScreencopySrc {
                 .format_list(gstreamer_video::VIDEO_FORMATS_ALL.iter().copied())
                 .build();
             let mut dmabuf_caps = gstreamer_video::VideoCapsBuilder::new()
-                .features(&[*gstreamer_allocators::CAPS_FEATURE_MEMORY_DMABUF])
+                .features([gstreamer_allocators::CAPS_FEATURE_MEMORY_DMABUF])
                 .format_list(gstreamer_video::VIDEO_FORMATS_ALL.iter().copied())
                 .build();
             dmabuf_caps.merge(caps);
@@ -645,6 +645,7 @@ impl BaseSrcImpl for WlrScreencopySrc {
         let state = guard.as_ref().unwrap();
 
         let (caps, _) = query.get_owned();
+        let caps = caps.expect("query without caps");
         let video_info =
             gstreamer_video::VideoInfo::from_caps(&caps).expect("failed to get video info");
 
@@ -726,7 +727,6 @@ impl BaseSrcImpl for WlrScreencopySrc {
                 config.add_option(gstreamer_video::BUFFER_POOL_OPTION_VIDEO_ALIGNMENT.as_ref());
                 config.set_video_alignment(video_align);
             }
-            let (caps, _) = query.get_owned();
             let video_info =
                 gstreamer_video::VideoInfo::from_caps(&caps).expect("failed to get video info");
             config.set_params(Some(&caps), video_info.size() as u32, 0, 0);

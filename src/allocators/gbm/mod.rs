@@ -11,7 +11,9 @@ glib::wrapper! {
 impl GbmMemoryAllocator {
     pub fn new<P: AsRef<Path>>(device_path: Option<P>) -> Self {
         let device_path = device_path.map(|p| p.as_ref().to_str().unwrap().to_string());
-        glib::Object::new(&[("device", &device_path)])
+        glib::Object::builder()
+            .property("device", &device_path)
+            .build()
     }
 
     pub fn alloc(
@@ -24,6 +26,6 @@ impl GbmMemoryAllocator {
 
 impl Default for GbmMemoryAllocator {
     fn default() -> Self {
-        glib::Object::new(&[])
+        glib::Object::new()
     }
 }
